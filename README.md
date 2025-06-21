@@ -10,4 +10,5 @@ python -m ipykernel install --user --name latmod_env --display-name="Latourian M
 python -m pip install openreview-py
 python -m pip install pikepdf
 conda install yapf # Not pip! I don't know why
+wget https://raw.githubusercontent.com/cascremers/pdfdiff/refs/heads/master/pdfdiff.py
 ```
