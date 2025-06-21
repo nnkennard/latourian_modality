@@ -1,4 +1,5 @@
 """Use OpenReview API to get initial and final PDFs for ICLR submissions.
+return 
 """
 
 import argparse
@@ -283,9 +284,9 @@ def main():
     # Gets top level notes for each `forum' (each paper submission is assigned
     # a forum)
     forum_notes = GUEST_CLIENT.get_all_notes(
-        invitation=INVITATIONS[args.conference])[:40]
+        invitation=INVITATIONS[args.conference])
 
-    status_file = f'{args.status_directory}/status_{args.conference}.jsonl'
+    status_file = f'{args.status_directory}/openreview_status_{args.conference}.jsonl'
     completed_forums = get_completed_forums(status_file)
 
     with open(status_file, 'a') as f:
