@@ -9,4 +9,5 @@ python -m pip install ipykernel
 python -m ipykernel install --user --name latmod_env --display-name="Latourian Modality"
 python -m pip install openreview-py
 python -m pip install pikepdf
+conda install yapf # Not pip! I don't know why
 ```
