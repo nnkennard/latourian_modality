@@ -1,5 +1,4 @@
 """Use OpenReview API to get initial and final PDFs for ICLR submissions.
-return 
 """
 
 import argparse
@@ -8,7 +7,6 @@ import json
 import openreview
 import os
 import pikepdf
-#import sys
 import tqdm
 
 import scc_lib
@@ -25,11 +23,11 @@ parser.add_argument("-c",
                     choices=scc_lib.Conference.ALL,
                     help="conference_year, e.g. iclr_2022",
                     required=True)
-parser.add_argument('-s',
-                    '--status_directory',
-                    default='./statuses/',
+parser.add_argument('-r',
+                    '--record_directory',
+                    default='./records/',
                     type=str,
-                    help='prefix for tsv file with status of all forums')
+                    help='prefix for tsv file with record of all forums')
 
 # == OpenReview-specific stuff ===============================================
 
@@ -74,7 +72,7 @@ def is_review(note, conference):
         return 'review' in note.content
 
 
-OpenReviewStatus = collections.namedtuple(
+OpenReviewRecord = collections.namedtuple(
     "OpenReviewStatus", "conference forum_id status decision".split())
 
 # == Other helpers ===========================================================
@@ -185,15 +183,6 @@ def write_metadata(forum_dir, forum, conference, initial_id, final_id,
                 },
                 indent=2))
 
-def get_completed_forums(status_file):
-    forum_list = []
-    try:
-        with open(status_file, 'r') as f:
-            for line in f:
-                forum_list.append(json.loads(line)['forum_id'])
-    except FileNotFoundError:
-        pass
-    return forum_list
 
 def process_forum(forum, conference, output_dir):
 
@@ -286,19 +275,25 @@ def main():
     forum_notes = GUEST_CLIENT.get_all_notes(
         invitation=INVITATIONS[args.conference])
 
-    status_file = f'{args.status_directory}/openreview_status_{args.conference}.jsonl'
-    completed_forums = get_completed_forums(status_file)
+    downloaded_forums = [
+        r['forum_id']
+        for r in scc_lib.get_records(args.record_directory, args.conference,
+                                      scc_lib.Stage.OPENREVIEW_DOWNLOAD)
+    ]
 
-    with open(status_file, 'a') as f:
+    with open(
+            scc_lib.get_record_filename(args.record_directory, args.conference,
+                                        scc_lib.Stage.OPENREVIEW_DOWNLOAD),
+            'a') as f:
         for forum in tqdm.tqdm(forum_notes):
-            if forum.id in completed_forums:
+            if forum.id in downloaded_forums:
                 continue
 
             # Process a forum. As a side effect, write pdfs to directory.
             status, decision = process_forum(forum, args.conference, final_dir)
             f.write(
                 json.dumps(
-                    OpenReviewStatus(args.conference, forum.id, status,
+                    OpenReviewRecord(args.conference, forum.id, status,
                                      decision)._asdict()) + "\n")
             f.flush()
 
