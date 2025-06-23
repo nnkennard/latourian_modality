@@ -30,15 +30,19 @@ class DownloadStatus(object):
     NO_REVISION = "no_revision"
     NO_DECISION = "no_decision"
 
+
 class ExtractionStatus(object):
     COMPLETE = "complete"
-    PDF_PARSE_ERROR = "pdf_parser_error"
-    TEXT_PARSE_ERROR = "text_parser_error"
+    EMPTY_PDF = "empty_pdf"
+    PDF_PARSE_ERROR = "pdf_parse_error"
+    TEXT_PARSE_ERROR = "text_parse_error"
+    NO_CHANGE = "no_change"
+    ERROR = "error"
 
 
 class Stage(object):
-    OPENREVIEW_DOWNLOAD = "openreview_download"
-    TEXT_EXTRACTION = "text_extraction"
+    DOWNLOAD = "download"
+    EXTRACT = "extract"
 
 
 def read_jsonl(filename):
@@ -50,7 +54,6 @@ def read_jsonl(filename):
 
 
 def get_record_filename(record_directory, conference, data_stage):
-    print(f'{record_directory}/{data_stage}_record_{conference}.jsonl')
     return f'{record_directory}/{data_stage}_record_{conference}.jsonl'
 
 
@@ -59,9 +62,22 @@ def get_records(record_directory, conference, data_stage):
         get_record_filename(record_directory, conference, data_stage))
 
 
+def get_extraction_processed_forums(record_directory, conference):
+    return [
+        r['forum_id']
+        for r in get_records(record_directory, conference, Stage.EXTRACT)
+    ]
+
+def get_downloads_processed_forums(record_directory, conference):
+    return [
+        r['forum_id']
+        for r in get_records(record_directory, conference, Stage.DOWNLOAD)
+    ]
+
+
 def get_completed_revisions_forums(record_directory, conference):
     return [
-        r['forum_id'] for r in get_records(record_directory, conference,
-                                           Stage.OPENREVIEW_DOWNLOAD)
+        r['forum_id']
+        for r in get_records(record_directory, conference, Stage.DOWNLOAD)
         if r['status'] == DownloadStatus.COMPLETE
     ]

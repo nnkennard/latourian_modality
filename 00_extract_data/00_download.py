@@ -27,7 +27,7 @@ parser.add_argument('-r',
                     '--record_directory',
                     default='./records/',
                     type=str,
-                    help='prefix for tsv file with record of all forums')
+                    help='saving outcomes of each stage')
 
 # == OpenReview-specific stuff ===============================================
 
@@ -79,14 +79,6 @@ OpenReviewRecord = collections.namedtuple(
 
 Review = collections.namedtuple("Review",
                                 "review_id text rating reviewer tcdate")
-
-
-class ForumStatus(object):
-    COMPLETE = "complete"
-    NO_REVIEWS = "no_reviews"
-    NO_PDF = "no_pdf"
-    NO_REVISION = "no_revision"
-    NO_DECISION = "no_decision"
 
 
 def first_not_none(l):
@@ -202,11 +194,11 @@ def process_forum(forum, conference, output_dir):
         for note in forum_notes
     ])
     if decision is None:
-        return ForumStatus.NO_DECISION, "None"
+        return scc_lib.DownloadStatus.NO_DECISION, "None"
 
     # e.g. If the paper was withdrawn
     if not review_notes:
-        return ForumStatus.NO_REVIEWS, decision
+        return scc_lib.DownloadStatus.NO_REVIEWS, decision
 
     # === Get `initial' and `final' pdfs ======================================
 
@@ -253,13 +245,13 @@ def process_forum(forum, conference, output_dir):
             write_metadata(forum_dir, forum, conference, initial_reference.id,
                            final_reference.id, decision, review_notes)
 
-            return ForumStatus.COMPLETE, decision
+            return scc_lib.DownloadStatus.COMPLETE, decision
         else:
             # Manuscript was not revised after the first review
-            return ForumStatus.NO_REVISION, decision
+            return scc_lib.DownloadStatus.NO_REVISION, decision
     else:
         # No versions associated with valid PDFs were found
-        return ForumStatus.NO_PDF, decision
+        return scc_lib.DownloadStatus.NO_PDF, decision
 
 
 def main():
@@ -275,18 +267,14 @@ def main():
     forum_notes = GUEST_CLIENT.get_all_notes(
         invitation=INVITATIONS[args.conference])
 
-    downloaded_forums = [
-        r['forum_id']
-        for r in scc_lib.get_records(args.record_directory, args.conference,
-                                      scc_lib.Stage.OPENREVIEW_DOWNLOAD)
-    ]
+    processed_forums = scc_lib.get_downloads_processed_forums(
+        args.record_directory, args.conference)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
-                                        scc_lib.Stage.OPENREVIEW_DOWNLOAD),
-            'a') as f:
+                                        scc_lib.Stage.DOWNLOAD), 'a') as f:
         for forum in tqdm.tqdm(forum_notes):
-            if forum.id in downloaded_forums:
+            if forum.id in processed_forums:
                 continue
 
             # Process a forum. As a side effect, write pdfs to directory.
