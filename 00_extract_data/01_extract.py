@@ -182,8 +182,9 @@ def main():
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.EXTRACT), 'a') as f:
 
-        for forum_id in scc_lib.get_completed_revisions_forums(
-                args.record_directory, args.conference):
+        for forum_id in tqdm.tqdm(
+                scc_lib.get_completed_revisions_forums(args.record_directory,
+                                                       args.conference)):
 
             if forum_id in extraction_processed_forums:
                 continue
@@ -197,8 +198,9 @@ def main():
             if all(isinstance(x, Version) for x in processed_texts.values()):
                 if processed_texts[scc_lib.INITIAL] == processed_texts[
                         scc_lib.FINAL]:
-                    record = ExtractionRecord(args.conference, forum_id,
-                                              scc_lib.ExtractionStatus.NO_CHANGE, None)
+                    record = ExtractionRecord(
+                        args.conference, forum_id,
+                        scc_lib.ExtractionStatus.NO_CHANGE, None)
 
                 else:
                     with open(
@@ -211,9 +213,9 @@ def main():
                                 processed_texts[
                                     scc_lib.FINAL]._asdict())._asdict(),
                                        indent=2))
-                        record = ExtractionRecord(args.conference, forum_id,
-                                                  scc_lib.ExtractionStatus.COMPLETE,
-                                                  None)
+                        record = ExtractionRecord(
+                            args.conference, forum_id,
+                            scc_lib.ExtractionStatus.COMPLETE, None)
 
             else:
                 details = [
@@ -225,7 +227,8 @@ def main():
                     for x in details
                 ]
                 record = ExtractionRecord(args.conference, forum_id,
-                                          scc_lib.ExtractionStatus.ERROR, details)
+                                          scc_lib.ExtractionStatus.ERROR,
+                                          details)
 
             f.write(json.dumps(record._asdict()) + "\n")
             f.flush()

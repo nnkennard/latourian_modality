@@ -112,7 +112,10 @@ def write_pdfs(forum_dir, initial_binary, final_binary):
         full_pdf = pikepdf.Pdf.open(full_pdf_path)
         truncated_pdf = pikepdf.Pdf.new()
         for page_num in range(3):
-            truncated_pdf.pages.append(full_pdf.pages[page_num])
+            try:
+                truncated_pdf.pages.append(full_pdf.pages[page_num])
+            except IndexError:
+                break  # Sometimes there are fewer than 3 pages
         truncated_pdf.save(pdf_path)
         os.remove(full_pdf_path)
 
