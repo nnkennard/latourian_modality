@@ -270,14 +270,16 @@ def main():
     forum_notes = GUEST_CLIENT.get_all_notes(
         invitation=INVITATIONS[args.conference])
 
-    processed_forums = scc_lib.get_downloads_processed_forums(
-        args.record_directory, args.conference)
+    downloads_already_done = scc_lib.get_records(args.record_directory,
+    args.conference, scc_lib.Stage.DOWNLOAD)
+    #processed_forums = scc_lib.get_downloads_processed_forums(
+    #    args.record_directory, args.conference)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.DOWNLOAD), 'a') as f:
         for forum in tqdm.tqdm(forum_notes):
-            if forum.id in processed_forums:
+            if forum.id in downloads_already_done:
                 continue
 
             # Process a forum. As a side effect, write pdfs to directory.

@@ -33,7 +33,7 @@ parser.add_argument('-r',
                     help='prefix for tsv file with status of all forums')
 
 DiffingRecord = collections.namedtuple(
-    "DiffingRecord", "conference forum_id bstract_status intro_status".split())
+    "DiffingRecord", "conference forum_id abstract_status intro_status".split())
 
 SENTENCIZE_PIPELINE = stanza.Pipeline("en", processors="tokenize")
 
@@ -46,17 +46,18 @@ def get_tokens(text):
 def main():
     args = parser.parse_args()
 
-    diffs_processed_forums = scc_lib.get_diffs_processed_forums(
-        args.record_directory, args.conference)
+    diffs_already_done = scc_lib.get_records(
+        args.record_directory, args.conference, scc_lib.Stage.COMPUTE)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.COMPUTE), 'a') as f:
 
-        for forum_id in tqdm.tqdm(scc_lib.get_completed_extractions_forums(
-                args.record_directory, args.conference)):
+        for forum_id in tqdm.tqdm(scc_lib.get_records(
+                args.record_directory, args.conference, scc_lib.Stage.EXTRACT,
+                complete_only=True)):
 
-            if forum_id in diffs_processed_forums:
+            if forum_id in diffs_already_done:
                 continue
 
             result_by_part = {}
@@ -75,7 +76,7 @@ def main():
                                 'w') as h:
                             h.write(d.dump())
                     else:
-                        result_by_part = d.error
+                        result_by_part[part] = d.error
 
                 scc_lib.write_record(DiffingRecord(args.conference, forum_id,
                         result_by_part['abstract'],

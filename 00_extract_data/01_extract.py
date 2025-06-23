@@ -175,18 +175,18 @@ def process_pdf(pdf_path):
 def main():
     args = parser.parse_args()
 
-    extraction_processed_forums = scc_lib.get_extraction_processed_forums(
-        args.record_directory, args.conference)
+    extraction_already_done = scc_lib.get_records(args.record_directory,
+    args.conference, scc_lib.Stage.EXTRACT)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.EXTRACT), 'a') as f:
 
         for forum_id in tqdm.tqdm(
-                scc_lib.get_completed_revisions_forums(args.record_directory,
-                                                       args.conference)):
+                scc_lib.get_records(args.record_directory, args.conference,
+                scc_lib.Stage.DOWNLOAD, complete_only=True)):
 
-            if forum_id in extraction_processed_forums:
+            if forum_id in extraction_already_done:
                 continue
 
             record = None
@@ -223,15 +223,14 @@ def main():
                     for v in [scc_lib.INITIAL, scc_lib.FINAL]
                 ]
                 details = [
-                    x if isinstance(x, str) else ExtractionStatus.COMPLETE
+                    x if isinstance(x, str) else scc_lib.ExtractionStatus.COMPLETE
                     for x in details
                 ]
                 record = ExtractionRecord(args.conference, forum_id,
                                           scc_lib.ExtractionStatus.ERROR,
                                           details)
 
-            f.write(json.dumps(record._asdict()) + "\n")
-            f.flush()
+            scc_lib.write_record(record, f)
 
 
 if __name__ == "__main__":
