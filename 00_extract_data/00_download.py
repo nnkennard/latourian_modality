@@ -43,6 +43,7 @@ class PDFStatus(object):
     DUPLICATE = "duplicate"
     FORBIDDEN = "forbidden"
     NOT_FOUND = "not_found"
+    OTHER_ERROR = "other_error"
 
 
 GUEST_CLIENT = openreview.Client(baseurl="https://api.openreview.net")
@@ -97,6 +98,10 @@ def get_binary(note):
         pdf_status = PDFStatus.AVAILABLE
     except openreview.OpenReviewException as e:
         pdf_status = PDF_ERROR_STATUS_LOOKUP[e.args[0]["name"]]
+        pdf_binary = None
+    except Exception as e:
+        pdf_status = PDFStatus.OTHER_ERROR
+        print(e, note.forum)
         pdf_binary = None
     return pdf_status, pdf_binary
 
@@ -178,6 +183,15 @@ def write_metadata(forum_dir, forum, conference, initial_id, final_id,
                 },
                 indent=2))
 
+def get_decision(forum_notes, conference):
+    if conference in [scc_lib.Conference.iclr_2022,
+        scc_lib.Conference.iclr_2023]:
+        for note in forum_notes:
+            if 'Decision' in note.invitation:
+                return note.content['decision']
+    else:
+    return None
+
 
 def process_forum(forum, conference, output_dir):
 
@@ -192,12 +206,8 @@ def process_forum(forum, conference, output_dir):
     # The conditions that make a note a review differ from year to year.
 
     # Retrieve decision
-    decision = first_not_none([
-        note.content.get('decision', note.content.get('recommendation', None))
-        for note in forum_notes
-    ])
-    if decision is None:
-        return scc_lib.DownloadStatus.NO_DECISION, "None"
+    decision = get_decision(forum_notes)
+    return scc_lib.DownloadStatus.NO_DECISION, "None"
 
     # e.g. If the paper was withdrawn
     if not review_notes:
@@ -272,8 +282,6 @@ def main():
 
     downloads_already_done = scc_lib.get_records(args.record_directory,
     args.conference, scc_lib.Stage.DOWNLOAD)
-    #processed_forums = scc_lib.get_downloads_processed_forums(
-    #    args.record_directory, args.conference)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
