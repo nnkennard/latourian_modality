@@ -183,14 +183,17 @@ def write_metadata(forum_dir, forum, conference, initial_id, final_id,
                 },
                 indent=2))
 
+
 def get_decision(forum_notes, conference):
-    if conference in [scc_lib.Conference.iclr_2022,
-        scc_lib.Conference.iclr_2023]:
+    if conference in [
+            scc_lib.Conference.iclr_2022, scc_lib.Conference.iclr_2023
+    ]:
         for note in forum_notes:
             if 'Decision' in note.invitation:
                 return note.content['decision']
     else:
-    return None
+        return first_not_none(
+            [note.content.get('decision', None) for note in forum_notes])
 
 
 def process_forum(forum, conference, output_dir):
@@ -206,8 +209,9 @@ def process_forum(forum, conference, output_dir):
     # The conditions that make a note a review differ from year to year.
 
     # Retrieve decision
-    decision = get_decision(forum_notes)
-    return scc_lib.DownloadStatus.NO_DECISION, "None"
+    decision = get_decision(forum_notes, conference)
+    if decision is None:
+        return scc_lib.DownloadStatus.NO_DECISION, "None"
 
     # e.g. If the paper was withdrawn
     if not review_notes:
@@ -281,7 +285,8 @@ def main():
         invitation=INVITATIONS[args.conference])
 
     downloads_already_done = scc_lib.get_records(args.record_directory,
-    args.conference, scc_lib.Stage.DOWNLOAD)
+                                                 args.conference,
+                                                 scc_lib.Stage.DOWNLOAD)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,

@@ -33,7 +33,8 @@ parser.add_argument('-r',
                     help='prefix for tsv file with status of all forums')
 
 DiffingRecord = collections.namedtuple(
-    "DiffingRecord", "conference forum_id abstract_status intro_status".split())
+    "DiffingRecord",
+    "conference forum_id abstract_status intro_status".split())
 
 SENTENCIZE_PIPELINE = stanza.Pipeline("en", processors="tokenize")
 
@@ -46,16 +47,19 @@ def get_tokens(text):
 def main():
     args = parser.parse_args()
 
-    diffs_already_done = scc_lib.get_records(
-        args.record_directory, args.conference, scc_lib.Stage.COMPUTE)
+    diffs_already_done = scc_lib.get_records(args.record_directory,
+                                             args.conference,
+                                             scc_lib.Stage.COMPUTE)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.COMPUTE), 'a') as f:
 
-        for forum_id in tqdm.tqdm(scc_lib.get_records(
-                args.record_directory, args.conference, scc_lib.Stage.EXTRACT,
-                complete_only=True)):
+        for forum_id in tqdm.tqdm(
+                scc_lib.get_records(args.record_directory,
+                                    args.conference,
+                                    scc_lib.Stage.EXTRACT,
+                                    complete_only=True)):
 
             if forum_id in diffs_already_done:
                 continue
@@ -78,9 +82,11 @@ def main():
                     else:
                         result_by_part[part] = d.error
 
-                scc_lib.write_record(DiffingRecord(args.conference, forum_id,
-                        result_by_part['abstract'],
-                        result_by_part['intro']), f)
+                scc_lib.write_record(
+                    DiffingRecord(args.conference, forum_id,
+                                  result_by_part['abstract'],
+                                  result_by_part['intro']), f)
+
 
 if __name__ == "__main__":
     main()

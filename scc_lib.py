@@ -66,11 +66,14 @@ def get_record_filename(record_directory, conference, data_stage):
 #    return read_jsonl(
 #        get_record_filename(record_directory, conference, data_stage))
 
-
 # == Helpers for resuming =====================================================
 
-def get_records(record_directory, conference, stage, complete_only=False,
-                    full_records=False):
+
+def get_records(record_directory,
+                conference,
+                stage,
+                complete_only=False,
+                full_records=False):
     records = read_jsonl(
         get_record_filename(record_directory, conference, stage))
     if complete_only:
@@ -79,6 +82,7 @@ def get_records(record_directory, conference, stage, complete_only=False,
         return records
     else:
         return [r['forum_id'] for r in records]
+
 
 def write_record(record, file_handle):
     file_handle.write(json.dumps(record._asdict()) + "\n")
@@ -110,7 +114,9 @@ FILENAMES = {
     FileCategories.INTRO: "diffs_intro.json",
 }
 
+
 def get_filenames(data_directory, conference, forum):
     return LatmodFilenames(*[
         f'{data_directory}/{conference}/{forum}/{FILENAMES[filecat]}'
-            for filecat in FileCategories.ALL])
+        for filecat in FileCategories.ALL
+    ])

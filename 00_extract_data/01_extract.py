@@ -176,15 +176,18 @@ def main():
     args = parser.parse_args()
 
     extraction_already_done = scc_lib.get_records(args.record_directory,
-    args.conference, scc_lib.Stage.EXTRACT)
+                                                  args.conference,
+                                                  scc_lib.Stage.EXTRACT)
 
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.EXTRACT), 'a') as f:
 
         for forum_id in tqdm.tqdm(
-                scc_lib.get_records(args.record_directory, args.conference,
-                scc_lib.Stage.DOWNLOAD, complete_only=True)):
+                scc_lib.get_records(args.record_directory,
+                                    args.conference,
+                                    scc_lib.Stage.DOWNLOAD,
+                                    complete_only=True)):
 
             if forum_id in extraction_already_done:
                 continue
@@ -223,8 +226,8 @@ def main():
                     for v in [scc_lib.INITIAL, scc_lib.FINAL]
                 ]
                 details = [
-                    x if isinstance(x, str) else scc_lib.ExtractionStatus.COMPLETE
-                    for x in details
+                    x if isinstance(x, str) else
+                    scc_lib.ExtractionStatus.COMPLETE for x in details
                 ]
                 record = ExtractionRecord(args.conference, forum_id,
                                           scc_lib.ExtractionStatus.ERROR,
