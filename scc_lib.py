@@ -1,6 +1,8 @@
 import collections
 import json
 
+from nltk.metrics.distance import edit_distance
+
 
 class Conference(object):
     iclr_2018 = "iclr_2018"
@@ -120,3 +122,86 @@ def get_filenames(data_directory, conference, forum):
         f'{data_directory}/{conference}/{forum}/{FILENAMES[filecat]}'
         for filecat in FileCategories.ALL
     ])
+
+
+# == Categorizing diffs
+
+TOKEN_DIFF_LENS = [
+    (1, 2),  # One token added
+    (1, 0),  # One token deleted
+    (1, 1)  # One token changed
+]
+TYPO_EDIT_DISTANCE = 4
+
+
+class DiffType(object):
+    INSERT = "insert"
+    DELETE = "delete"
+    MODIFY = "modify"
+    TYPO = "typo"
+
+
+class DiffScope(object):
+    TOKEN = "token"
+    IN_SENTENCE = "in_sentence"
+    MULTI_SENTENCE = "multi_sentence"
+
+
+def compute_sentence_ranges(sentences):
+    tokens_seen = 0
+    sentence_ranges = []
+    for sentence in sentences:
+        end = tokens_seen + len(sentence)
+        sentence_ranges.append(range(tokens_seen, end))
+        tokens_seen = end
+
+    return sentence_ranges
+
+
+def get_diff_type(diff):
+    if abs(edit_distance("".join(diff['old']),
+                         "".join(diff['new']))) < TYPO_EDIT_DISTANCE:
+        return DiffType.TYPO
+    elif not diff['new']:
+        return DiffType.DELETE
+    elif len(diff['old']) == 1 and diff['old'] == diff['new'][:1]:
+        return DiffType.INSERT
+    else:
+        return DiffType.MODIFY
+
+
+def is_in_sentence(diff, sentence_ranges, skip_first=False):
+    index = diff['index']
+    if skip_first:
+        index += 1
+    if index == sentence_ranges[-1].stop:  # A sentence is being appended
+        assert skip_first
+        return True
+    for r in sentence_ranges:
+        if index in r:
+            if index + len(diff['old']) in r:
+                return True
+            else:
+                return False
+    assert False
+
+
+def get_diff_type_and_scope(diff, sentence_ranges):
+
+    diff_type = get_diff_type(diff)
+
+    scope = None
+    diff_len = (len(diff['old']), len(diff['new']))
+    if diff_len in TOKEN_DIFF_LENS:
+        scope = DiffScope.TOKEN
+    elif is_in_sentence(diff, sentence_ranges):
+        scope = DiffScope.IN_SENTENCE
+    else:
+        if diff_type == DiffType.INSERT and is_in_sentence(
+                diff, sentence_ranges, skip_first=True):
+            scope = DiffScope.IN_SENTENCE
+        else:
+            scope = DiffScope.MULTI_SENTENCE
+    assert scope is not None
+
+    return diff_type, scope

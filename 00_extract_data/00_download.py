@@ -81,13 +81,11 @@ OpenReviewRecord = collections.namedtuple(
 Review = collections.namedtuple("Review",
                                 "review_id text rating reviewer tcdate")
 
-
-def first_not_none(l):
-    for x in l:
-        if x is not None:
-            return x
-    return None
-
+#def first_not_none(l):
+#    for x in l:
+#        if x is not None:
+#            return x
+#    return None
 
 # ============================================================================
 
@@ -186,14 +184,19 @@ def write_metadata(forum_dir, forum, conference, initial_id, final_id,
 
 def get_decision(forum_notes, conference):
     if conference in [
-            scc_lib.Conference.iclr_2022, scc_lib.Conference.iclr_2023
+            scc_lib.Conference.iclr_2018, scc_lib.Conference.iclr_2020,
+            scc_lib.Conference.iclr_2021, scc_lib.Conference.iclr_2022,
+            scc_lib.Conference.iclr_2023
     ]:
         for note in forum_notes:
             if 'Decision' in note.invitation:
                 return note.content['decision']
+    elif conference in [scc_lib.Conference.iclr_2019]:
+        for note in forum_notes:
+            if 'Meta_Review' in note.invitation:
+                return note.content['recommendation']
     else:
-        return first_not_none(
-            [note.content.get('decision', None) for note in forum_notes])
+        assert False
 
 
 def process_forum(forum, conference, output_dir):
