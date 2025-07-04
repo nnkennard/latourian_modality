@@ -12,6 +12,7 @@ python -m pip install pikepdf
 python -m pip install myers
 python -m pip install stanza
 python -m pip install nltk
+python -m pip install pygtrie
 conda install yapf # Not pip! I don't know why
 wget https://raw.githubusercontent.com/cascremers/pdfdiff/refs/heads/master/pdfdiff.py
 ```
