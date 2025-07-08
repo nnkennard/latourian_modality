@@ -55,7 +55,8 @@ def main():
 
     trie = CountTrie()
     UNIGRAM_PATH = "/gypsum/work1/mccallum/nnayak/google_unigrams/"
-    for filename in tqdm.tqdm(glob.glob(f'{UNIGRAM_PATH}*')):
+    for filename in tqdm.tqdm(sorted(list(glob.glob(f'{UNIGRAM_PATH}*.gz')))):
+        print(filename)
         with gzip.open(filename, 'rb') as f:
             for line in f:
                 token, year, count, _ = line.split(b"\t")
