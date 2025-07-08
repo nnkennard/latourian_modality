@@ -25,12 +25,14 @@ def get_anchor_index(diff, sentence_ranges):
         if diff['index'] in r:
             return r.start
 
+
 def get_sentence(index, sentences):
     i = 0
     for sentence in sentences:
         if i <= index and index < i + len(sentence):
             return sentence
         i += len(sentence)
+
 
 def source_to_dest_anchor(source_sentence_ranges, diffs, obj):
     source_sentence_starts = [r.start for r in source_sentence_ranges]
@@ -44,12 +46,16 @@ def source_to_dest_anchor(source_sentence_ranges, diffs, obj):
     flat_source = sum(obj['tokens']['source'], [])
     flat_dest = sum(obj['tokens']['dest'], [])
 
-    for a, b in zip(source_sentence_starts, dest_sentence_starts):
-        print(flat_source[a], flat_dest[b])
+    try:
+        for a, b in zip(source_sentence_starts, dest_sentence_starts):
+            #print(flat_source[a], flat_dest[b])
+            x, y = flat_source[a], flat_dest[b]
+            if not x == y:
+                print("~~", x, y)
+    except IndexError:
+        return None
 
-    return {k:v for k, v in zip(source_sentence_starts, dest_sentence_starts)}
-
-
+    return {k: v for k, v in zip(source_sentence_starts, dest_sentence_starts)}
 
 
 def get_sentence_diff_pairs(filename):
@@ -60,7 +66,7 @@ def get_sentence_diff_pairs(filename):
         obj['tokens']['source'])
 
     source_to_dest = source_to_dest_anchor(source_sentence_ranges,
-    obj['diffs'], obj)
+                                           obj['diffs'], obj)
 
     sentence_diff_list = []
     for diff in obj['diffs']:
@@ -73,17 +79,78 @@ def get_sentence_diff_pairs(filename):
     for sentence_diff in sentence_diff_list:
         anchor_index = get_anchor_index(sentence_diff, source_sentence_ranges)
         old_sentence = get_sentence(anchor_index, obj['tokens']['source'])
-        new_sentence = get_sentence(source_to_dest[anchor_index],
-                                    obj['tokens']['dest'])
-        print(sentence_diff)
-        print(" ".join(old_sentence))
-        print(" ".join(new_sentence))
-        print()
-
+        try:
+            new_sentence = get_sentence(source_to_dest[anchor_index],
+                                        obj['tokens']['dest'])
+            #print(sentence_diff)
+            #print(" ".join(old_sentence))
+            #print(" ".join(new_sentence))
+            #print()
+        except TypeError:
+            print("Problems")
+            continue
 
         #print(sentence_diff_list)
 
     return []
+
+
+ols_reconstruct = """
+def reconstruct(filename):
+    with open(filename, 'r') as f:
+        obj = json.load(f)
+
+    source_tokens = sum(obj['tokens']['source'], [])
+    dest_tokens = sum(obj['tokens']['dest'], [])
+
+
+    reconstructed_tokens = []
+    source_cursor = 0
+    for i, diff in enumerate(obj['diffs']):
+        reconstructed_tokens += source_tokens[source_cursor:diff['index']]
+        reconstructed_tokens += diff['new']
+        source_cursor = diff['index'] + len(diff['old'])
+
+    reconstructed_tokens += source_tokens[source_cursor:]
+
+    return reconstructed_tokens == dest_tokens
+"""
+
+
+def index_mapping(filename):
+    with open(filename, 'r') as f:
+        obj = json.load(f)
+
+    source_tokens = sum(obj['tokens']['source'], [])
+    dest_tokens = sum(obj['tokens']['dest'], [])
+
+    source_map_index = range(len(source_tokens))
+
+    reconstructed_tokens = []
+    reconstructed_indices = []
+    source_cursor = 0
+    for i, diff in enumerate(obj['diffs']):
+        upto_index = diff['index']
+        if diff['old'][0] == diff['new'][0]:
+            upto_index += 1
+        reconstructed_indices += source_map_index[source_cursor:upto_index]
+        break
+
+        reconstructed_tokens += source_tokens[source_cursor:diff['index']]
+
+        reconstructed_indices += source_map_index[source_cursor:diff['index']]
+        reconstructed_tokens += diff['new']
+        source_cursor = diff['index'] + len(diff['old'])
+        reconstructed_indices += [None] * len(diff['old'])
+
+    reconstructed_tokens += source_tokens[source_cursor:]
+    reconstructed_indices += source_map_index[source_cursor:]
+
+    for i, mapped in enumerate(reconstructed_indices):
+        if mapped is not None:
+            print(source_tokens[i], dest_tokens[mapped])
+
+    return reconstructed_tokens == dest_tokens
 
 
 def main():
@@ -97,13 +164,14 @@ def main():
                                                  scc_lib.Stage.COMPUTE,
                                                  full_records=True)
         for forum in diffs_tried_forums:
+            #print(f"\nForum: {forum['forum_id']}", end="")
             filenames = scc_lib.get_filenames(args.data_dir, conference,
                                               forum['forum_id'])
             for section in ['abstract', 'intro']:
                 if not forum[f'{section}_status'] == 'complete':
                     continue
-                sentence_diff_pairs += get_sentence_diff_pairs(
-                    filenames._asdict()[section])
+                #reconstruct(filenames._asdict()[section])
+                index_mapping(filenames._asdict()[section])
 
 
 if __name__ == "__main__":
