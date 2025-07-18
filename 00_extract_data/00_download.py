@@ -81,12 +81,6 @@ OpenReviewRecord = collections.namedtuple(
 Review = collections.namedtuple("Review",
                                 "review_id text rating reviewer tcdate")
 
-#def first_not_none(l):
-#    for x in l:
-#        if x is not None:
-#            return x
-#    return None
-
 # ============================================================================
 
 
@@ -155,33 +149,6 @@ def get_review_text_and_rating(note, conference):
     return review_text, rating
 
 
-def write_metadata(forum_dir, forum, conference, initial_id, final_id,
-                   decision, review_notes):
-    reviews = []
-    for review_note in review_notes:
-        review_text, rating = get_review_text_and_rating(
-            review_note, conference)
-        reviews.append(
-            Review(review_note.id, review_text, rating,
-                   export_signature(review_note),
-                   review_note.tcdate)._asdict())
-    with open(f'{forum_dir}/metadata.json', 'w') as f:
-        f.write(
-            json.dumps(
-                {
-                    'identifier': forum.id,
-                    'reviews': reviews,
-                    'decision': decision,
-                    'conference': conference,
-                    'urls': {
-                        'forum': f'{FORUM_URL_PREFIX}{forum.id}',
-                        'initial': f'{PDF_URL_PREFIX}{initial_id}',
-                        'final': f'{PDF_URL_PREFIX}{final_id}',
-                    }
-                },
-                indent=2))
-
-
 def get_decision(forum_notes, conference):
     if conference in [
             scc_lib.Conference.iclr_2018, scc_lib.Conference.iclr_2020,
@@ -199,26 +166,58 @@ def get_decision(forum_notes, conference):
         assert False
 
 
-def process_forum(forum, conference, output_dir):
-
-    # === Get all notes, reviews, decisions, etc ==============================
-
-    forum_notes = GUEST_CLIENT.get_all_notes(forum=forum.id)
-
-    # Retrieve all reviews from the forum
+def get_reviews(forum_notes, conference):
     review_notes = [
         note for note in forum_notes if is_review(note, conference)
     ]
-    # The conditions that make a note a review differ from year to year.
+    review_objects = []
+    for review_note in review_notes:
+        review_text, rating = get_review_text_and_rating(
+            review_note, conference)
+        review_objects.append(
+            Review(review_note.id, review_text, rating,
+                   export_signature(review_note),
+                   review_note.tcdate)._asdict())
+    return review_notes, review_objects
+
+
+def process_forum(forum, conference, forum_dir):
+
+    # Things needed for metadata:
+    metadata_builder = {
+        'identifier': forum.id,
+        'conference': conference,
+        'reviews': None,
+        'decision': None,
+        'urls': {
+            'forum': f'{FORUM_URL_PREFIX}{forum.id}',
+            'initial': None,
+            'final': None,
+        }
+    }
+
+    forum_notes = GUEST_CLIENT.get_all_notes(forum=forum.id)
+
+    # == Check that reviews exist ===========================================
+
+    # Retrieve reviews. If reviews didn't happen, then we can't say anything
+    # about this forum
+
+    review_notes, review_objects = get_reviews(forum_notes, conference)
+    metadata_builder['reviews'] = review_objects
+
+    # e.g. if paper was withdrawn
+    if not review_objects:
+        return scc_lib.DownloadStatus.NO_REVIEWS, metadata_builder
+
+    # == Check that decision exists ===========================================
 
     # Retrieve decision
-    decision = get_decision(forum_notes, conference)
-    if decision is None:
-        return scc_lib.DownloadStatus.NO_DECISION, "None"
+    metadata_builder['decision'] = get_decision(forum_notes, conference)
 
-    # e.g. If the paper was withdrawn
-    if not review_notes:
-        return scc_lib.DownloadStatus.NO_REVIEWS, decision
+    # Occasionally there is no decision
+    if metadata_builder['decision'] is None:
+        return scc_lib.DownloadStatus.NO_DECISION, metadata_builder
 
     # === Get `initial' and `final' pdfs ======================================
 
@@ -249,29 +248,39 @@ def process_forum(forum, conference, output_dir):
     initial_reference, initial_binary = get_last_valid_reference(
         references_before_review)
 
-    # === Finalize ============================================================
+    metadata_builder['urls'][
+        'initial'] = None if initial_reference is None else f'{PDF_URL_PREFIX}{initial_reference.id}'
+    metadata_builder['urls'][
+        'final'] = None if final_reference is None else f'{PDF_URL_PREFIX}{final_reference.id}'
 
     # Proceed only for forums with valid and distinct initial and final
     # versions
     if final_reference is not None and initial_reference is not None:
         if not final_reference.id == initial_reference.id:
 
-            # Create subdirectory
-            forum_dir = f'{output_dir}/{forum.id}'
-            os.makedirs(forum_dir, exist_ok=True)
-
             # Write pdfs and metadata
             write_pdfs(forum_dir, initial_binary, final_binary)
-            write_metadata(forum_dir, forum, conference, initial_reference.id,
-                           final_reference.id, decision, review_notes)
-
-            return scc_lib.DownloadStatus.COMPLETE, decision
+            return scc_lib.DownloadStatus.COMPLETE, metadata_builder
         else:
             # Manuscript was not revised after the first review
-            return scc_lib.DownloadStatus.NO_REVISION, decision
+            return scc_lib.DownloadStatus.NO_REVISION, metadata_builder
     else:
         # No versions associated with valid PDFs were found
-        return scc_lib.DownloadStatus.NO_PDF, decision
+        return scc_lib.DownloadStatus.NO_PDF, metadata_builder
+
+
+def process_forum_wrapper(forum, conference, output_dir):
+
+
+    # Create a directory for the forum
+    forum_dir = f'{output_dir}/{forum.id}'
+    os.makedirs(forum_dir, exist_ok=True)
+
+    status, metadata = process_forum(forum, conference, forum_dir)
+    with open(f'{forum_dir}/metadata.json', 'w') as f:
+        f.write(json.dumps(metadata, indent=2))
+
+    return status, metadata['decision']
 
 
 def main():
@@ -299,7 +308,8 @@ def main():
                 continue
 
             # Process a forum. As a side effect, write pdfs to directory.
-            status, decision = process_forum(forum, args.conference, final_dir)
+            status, decision = process_forum_wrapper(forum, args.conference,
+                                                     final_dir)
             f.write(
                 json.dumps(
                     OpenReviewRecord(args.conference, forum.id, status,
