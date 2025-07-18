@@ -11,6 +11,7 @@ use Myers to describe the edirs within the non-matching blocks.
 
 import collections
 import difflib
+import interval
 import json
 import myers
 import re
@@ -24,11 +25,25 @@ MAX_LEN = 3000
 MatchingBlock = collections.namedtuple(MATCHING_BLOCK, "a b l".split())
 NonMatchingBlock = collections.namedtuple(NONMATCHING_BLOCK,
                                           "a b l_a l_b".split())
-Diff = collections.namedtuple("Diff", "index old new".split())
+Diff = collections.namedtuple("Diff",
+    "index old_tokens new_tokens".split())
+
+Diff2 = collections.namedtuple("Diff",
+    "old_index new_index old_tokens new_tokens".split())
+
 
 
 def flatten_sentences(sentences):
     return sum(sentences, [])
+
+def compute_ranges(unflat_sentences):
+    cursor = 0
+    ranges = []
+    for sent in unflat_sentences:
+        end = cursor + len(sent)
+        ranges.append(interval.Interval(cursor, end, upper_closed=False))
+        cursor = end
+    return ranges
 
 
 class DocumentDiff(object):
@@ -37,43 +52,42 @@ class DocumentDiff(object):
         # Saving these, but they are only used for output
         self.source_unflat = unflat_source_tokens
         self.dest_unflat = unflat_dest_tokens
-        # Flattened tokens are used in the diff calculations
+
+        self.source_ranges = compute_ranges(self.source_unflat)
+        self.dest_ranges = compute_ranges(self.dest_unflat)
+
         self.source_tokens = flatten_sentences(unflat_source_tokens)
         self.dest_tokens = flatten_sentences(unflat_dest_tokens)
+
         self.error = None
-
-        #with open('debug_source_tokens.txt', 'w') as f:
-        #    f.write("\n".join(self.source_tokens))
-        #with open('debug_dest_tokens.txt', 'w') as f:
-        #    f.write("\n".join(self.dest_tokens))
-
         self.calculate()
 
     def calculate(self):
-        #print("calculating")
-        self.diffs = []
 
         # Get matching and nonmatching blocks, then verify block calculation
-        self.blocks = self._get_matching_blocks()
-        self._reconstruct_from_blocks()
-        #print("starting myers", len(self.blocks))
-        # Convert each nonmatching block into diffs
-        #for block in tqdm.tqdm(self.blocks):
-        for block in self.blocks:
-            if isinstance(block, NonMatchingBlock):
-                self.diffs += self._diff_within_block(block)
+        blocks = self._get_matching_blocks()
 
-        #print("verifying")
-        # Verify diff calculation
-        self._reconstruct_from_diffs()
+        # Verify block calculation
+        self._reconstruct_from_blocks(blocks)
+
+        # Blocks to chunk diffs
+        chunk_diffs = []
+        for block in blocks:
+            if isinstance(block, NonMatchingBlock):
+                chunk_diffs += self._block_to_chunk_diffs(block)
+
+        # Verify chunk diff calculations
+        self._reconstruct_from_chunk_diffs(chunk_diffs)
+
+        self.diffs = chunk_diffs
+        #for chunk_diff in chunk_diffs:
+        #    self.diffs += self._unchunk_chunk_diff(chunk_diff)
 
     def _get_matching_blocks(self):
         """Get maximal matching blocks and calculate nonmatching blocks.
         """
-        #print("start matching blocks")
         matching_blocks = difflib.SequenceMatcher(
             None, self.source_tokens, self.dest_tokens).get_matching_blocks()
-        #print("done matching blocks")
 
         blocks = []  # Alternating matching and nonmatching blocks
 
@@ -105,17 +119,16 @@ class DocumentDiff(object):
 
         return blocks
 
-    def _diff_within_block(self, block):
+    def _block_to_chunk_diffs(self, block):
         """Convert nonmatching block into a diff."""
 
-        #print(block.l_b)
         if block.l_b + block.l_a > MAX_LEN:
             print(f"Skipped large block")
             # This diff adds many characters. It's likely to be something like
             # an appendix being added. We just convert the block into one large
             # diff.
             return [
-                Diff(block.a, self.source_tokens[block.a:block.a + block.l_a],
+                Diff2(block.a - 1, block.b - 1, self.source_tokens[block.a:block.a + block.l_a],
                      self.dest_tokens[block.b:block.b + block.l_b])
             ]
 
@@ -123,14 +136,22 @@ class DocumentDiff(object):
             self.source_tokens[block.a:block.a + block.l_a],
             self.dest_tokens[block.b:block.b + block.l_b])
 
+        print(self.source_tokens[block.a:block.a + block.l_a],
+            self.dest_tokens[block.b:block.b + block.l_b])
+        print(set(x for x, _ in myers_diff))
+
         # In our method of diff naming, each diff needs to be anchored to an
         # index in the source sequence. The anchors are collected below.
         indexed_myers_diff = []
-        original_index = block.a
+        original_index = block.a - 1
+        dest_index = block.b - 1
         for action, token in myers_diff:
-            indexed_myers_diff.append((original_index, action, token))
+            indexed_myers_diff.append((original_index, dest_index, action, token))
+            assert action in 'kir'
             if action in 'kr':
                 original_index += 1
+            if action in 'ki':
+                dest_index += 1
 
         diffs = []
         diff_str = "".join(x[0] for x in myers_diff)
@@ -139,7 +160,7 @@ class DocumentDiff(object):
             # A sequence of non-keep actions (inserts and removes)
             start, end = m.span()
             diff_substr = diff_str[start:end]
-            diff_anchor, _, _ = indexed_myers_diff[start]
+            diff_source_anchor, diff_dest_anchor, _, _ = indexed_myers_diff[start]
 
             inserted = []
             removed = []
@@ -151,18 +172,32 @@ class DocumentDiff(object):
                 else:
                     removed.append(token)
 
-            if 'r' not in diff_substr:
-                # This diff has only removes, so it has nothing to anchor to in
-                # the source sequence. We artificially remove and reinsert the
-                # token just before the diff.
-                diff_anchor -= 1
-                anchor_token = self.source_tokens[diff_anchor]
-                diffs.append(
-                    Diff(diff_anchor, [anchor_token] + removed,
-                         [anchor_token] + inserted))
-            else:
-                diffs.append(Diff(diff_anchor, removed, inserted))
+            #if 'r' not in diff_substr:
+            #    # This diff has only removes, so it has nothing to anchor to in
+            #    # the source sequence. We artificially remove and reinsert the
+            #    # token just before the diff.
+            #    diff_anchor -= 1
+            #    anchor_token = self.source_tokens[diff_anchor]
+            #    diffs.append(
+            #        Diff(diff_source_anchor, diff_dest_anchor, [anchor_token] + removed,
+            #             [anchor_token] + inserted))
+            #else:
+            diffs.append(Diff2(diff_source_anchor, diff_dest_anchor, removed, inserted))
         return diffs
+
+    def _unchunk_chunk_diffs(self, chunk_diff):
+        unchunked_old = sentence_split(chunk_diff.old_index,
+        chunk_diff.old_tokens,
+        self.source_ranges)
+        unchunked_new = sentence_split(chunk_diff.new_index,
+        chunk_diff.new_tokens,
+        self.dest_ranges)
+        return Diff(
+            chunk_diff.old_index, chunk_diff.new_index,
+                unchunked_old, unchunked_new
+        )
+        
+
 
     def dump(self):
         if self.error is None:
@@ -181,9 +216,9 @@ class DocumentDiff(object):
     # ======= Reconstruction methods below ====================================
     # These methods are used to check for bugs in the diff logic.
 
-    def _reconstruct_from_blocks(self):
+    def _reconstruct_from_blocks(self, blocks):
         reconstructed_tokens = []
-        for block in self.blocks:
+        for block in blocks:
             if isinstance(block, MatchingBlock):
                 reconstructed_tokens += self.source_tokens[block.a:block.a +
                                                            block.l]
@@ -195,16 +230,45 @@ class DocumentDiff(object):
 
         assert reconstructed_tokens == self.dest_tokens
 
+    def _reconstruct_from_chunk_diffs(self, chunk_diffs):
+        reconstructed_tokens = []
+        source_cursor = 0
+        for i, diff in enumerate(chunk_diffs):
+            print(diff)
+            reconstructed_tokens += self.source_tokens[source_cursor:diff.
+                                                       old_index + 1]
+            print("___")
+            print(reconstructed_tokens)
+            reconstructed_tokens += diff.new_tokens
+            source_cursor = diff.old_index + 1 +len(diff.old_tokens)
+
+        reconstructed_tokens += self.source_tokens[source_cursor:]
+
+        if not reconstructed_tokens == self.dest_tokens:
+            print("Reconstructed")
+            print(" ".join(reconstructed_tokens))
+            print("Actual")
+            print(" ".join(self.dest_tokens))
+            dsds
+            self.error = "chunk_reconstruction_error"
+        else:
+            print("OK")
+
     def _reconstruct_from_diffs(self):
         reconstructed_tokens = []
         source_cursor = 0
         for i, diff in enumerate(self.diffs):
             reconstructed_tokens += self.source_tokens[source_cursor:diff.
-                                                       index]
-            reconstructed_tokens += diff.new
-            source_cursor = diff.index + len(diff.old)
+                                                       index + 1]
+            for new_string in diff.new_tokens:
+                reconstructed_tokens += new_string
+
+            source_cursor = diff.index
+            for old_string in diff.old_tokens:
+                source_cursor += len(old_string)
 
         reconstructed_tokens += self.source_tokens[source_cursor:]
 
         if not reconstructed_tokens == self.dest_tokens:
+            dsdsds
             self.error = "reconstruction_error"
