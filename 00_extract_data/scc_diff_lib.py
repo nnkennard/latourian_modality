@@ -25,25 +25,47 @@ MAX_LEN = 3000
 MatchingBlock = collections.namedtuple(MATCHING_BLOCK, "a b l".split())
 NonMatchingBlock = collections.namedtuple(NONMATCHING_BLOCK,
                                           "a b l_a l_b".split())
-Diff = collections.namedtuple("Diff",
-    "index old_tokens new_tokens".split())
+#Diff = collections.namedtuple("Diff",
+#    "index old_tokens new_tokens".split())
 
-Diff2 = collections.namedtuple("Diff",
-    "old_index new_index old_tokens new_tokens".split())
-
+Diff2 = collections.namedtuple(
+    "Diff2", "old_index new_index old_tokens new_tokens".split())
 
 
 def flatten_sentences(sentences):
     return sum(sentences, [])
+
 
 def compute_ranges(unflat_sentences):
     cursor = 0
     ranges = []
     for sent in unflat_sentences:
         end = cursor + len(sent)
-        ranges.append(interval.Interval(cursor, end, upper_closed=False))
+        ranges.append(interval.Interval(cursor, end))
         cursor = end
     return ranges
+
+
+EMPTY_INTERVAL = interval.Interval(0, 0)
+
+
+def sentence_split(anchor, tokens, ranges, original_tokens):
+    target_range = interval.Interval(anchor + 1, anchor + 1 + len(tokens))
+    diff_ranges = []
+    for r in ranges:
+        if r == target_range:
+            diff_ranges.append(r)
+        else:
+            maybe_intersection = r & target_range
+            if maybe_intersection == EMPTY_INTERVAL:
+                continue
+            diff_ranges.append(maybe_intersection)
+    split_tokens = []
+    for r in diff_ranges:
+        split_tokens.append(original_tokens[r.lower_bound:r.upper_bound])
+
+    assert sum(split_tokens, []) == tokens
+    return split_tokens
 
 
 class DocumentDiff(object):
@@ -79,9 +101,13 @@ class DocumentDiff(object):
         # Verify chunk diff calculations
         self._reconstruct_from_chunk_diffs(chunk_diffs)
 
-        self.diffs = chunk_diffs
-        #for chunk_diff in chunk_diffs:
-        #    self.diffs += self._unchunk_chunk_diff(chunk_diff)
+        #self.diffs = chunk_diffs
+        self.diffs = []
+        for chunk_diff in chunk_diffs:
+            self.diffs.append(self._unchunk_chunk_diff(chunk_diff))
+
+        # Verify chunk diff calculations
+        self._reconstruct_from_diffs()
 
     def _get_matching_blocks(self):
         """Get maximal matching blocks and calculate nonmatching blocks.
@@ -128,17 +154,14 @@ class DocumentDiff(object):
             # an appendix being added. We just convert the block into one large
             # diff.
             return [
-                Diff2(block.a - 1, block.b - 1, self.source_tokens[block.a:block.a + block.l_a],
-                     self.dest_tokens[block.b:block.b + block.l_b])
+                Diff2(block.a - 1, block.b - 1,
+                      self.source_tokens[block.a:block.a + block.l_a],
+                      self.dest_tokens[block.b:block.b + block.l_b])
             ]
 
         myers_diff = myers.diff(
             self.source_tokens[block.a:block.a + block.l_a],
             self.dest_tokens[block.b:block.b + block.l_b])
-
-        print(self.source_tokens[block.a:block.a + block.l_a],
-            self.dest_tokens[block.b:block.b + block.l_b])
-        print(set(x for x, _ in myers_diff))
 
         # In our method of diff naming, each diff needs to be anchored to an
         # index in the source sequence. The anchors are collected below.
@@ -146,7 +169,8 @@ class DocumentDiff(object):
         original_index = block.a - 1
         dest_index = block.b - 1
         for action, token in myers_diff:
-            indexed_myers_diff.append((original_index, dest_index, action, token))
+            indexed_myers_diff.append(
+                (original_index, dest_index, action, token))
             assert action in 'kir'
             if action in 'kr':
                 original_index += 1
@@ -160,7 +184,8 @@ class DocumentDiff(object):
             # A sequence of non-keep actions (inserts and removes)
             start, end = m.span()
             diff_substr = diff_str[start:end]
-            diff_source_anchor, diff_dest_anchor, _, _ = indexed_myers_diff[start]
+            diff_source_anchor, diff_dest_anchor, _, _ = indexed_myers_diff[
+                start]
 
             inserted = []
             removed = []
@@ -172,32 +197,19 @@ class DocumentDiff(object):
                 else:
                     removed.append(token)
 
-            #if 'r' not in diff_substr:
-            #    # This diff has only removes, so it has nothing to anchor to in
-            #    # the source sequence. We artificially remove and reinsert the
-            #    # token just before the diff.
-            #    diff_anchor -= 1
-            #    anchor_token = self.source_tokens[diff_anchor]
-            #    diffs.append(
-            #        Diff(diff_source_anchor, diff_dest_anchor, [anchor_token] + removed,
-            #             [anchor_token] + inserted))
-            #else:
-            diffs.append(Diff2(diff_source_anchor, diff_dest_anchor, removed, inserted))
+            diffs.append(
+                Diff2(diff_source_anchor, diff_dest_anchor, removed, inserted))
         return diffs
 
-    def _unchunk_chunk_diffs(self, chunk_diff):
+    def _unchunk_chunk_diff(self, chunk_diff):
         unchunked_old = sentence_split(chunk_diff.old_index,
-        chunk_diff.old_tokens,
-        self.source_ranges)
+                                       chunk_diff.old_tokens,
+                                       self.source_ranges, self.source_tokens)
         unchunked_new = sentence_split(chunk_diff.new_index,
-        chunk_diff.new_tokens,
-        self.dest_ranges)
-        return Diff(
-            chunk_diff.old_index, chunk_diff.new_index,
-                unchunked_old, unchunked_new
-        )
-        
-
+                                       chunk_diff.new_tokens, self.dest_ranges,
+                                       self.dest_tokens)
+        return Diff2(chunk_diff.old_index, chunk_diff.new_index, unchunked_old,
+                     unchunked_new)
 
     def dump(self):
         if self.error is None:
@@ -234,41 +246,34 @@ class DocumentDiff(object):
         reconstructed_tokens = []
         source_cursor = 0
         for i, diff in enumerate(chunk_diffs):
-            print(diff)
             reconstructed_tokens += self.source_tokens[source_cursor:diff.
                                                        old_index + 1]
-            print("___")
-            print(reconstructed_tokens)
             reconstructed_tokens += diff.new_tokens
-            source_cursor = diff.old_index + 1 +len(diff.old_tokens)
+            source_cursor = diff.old_index + 1 + len(diff.old_tokens)
+
+            assert ((diff.old_index == diff.new_index == -1)
+                    or self.source_tokens[diff.old_index]
+                    == self.dest_tokens[diff.new_index])
 
         reconstructed_tokens += self.source_tokens[source_cursor:]
 
         if not reconstructed_tokens == self.dest_tokens:
-            print("Reconstructed")
-            print(" ".join(reconstructed_tokens))
-            print("Actual")
-            print(" ".join(self.dest_tokens))
-            dsds
             self.error = "chunk_reconstruction_error"
-        else:
-            print("OK")
 
     def _reconstruct_from_diffs(self):
         reconstructed_tokens = []
         source_cursor = 0
         for i, diff in enumerate(self.diffs):
             reconstructed_tokens += self.source_tokens[source_cursor:diff.
-                                                       index + 1]
+                                                       old_index + 1]
             for new_string in diff.new_tokens:
                 reconstructed_tokens += new_string
 
-            source_cursor = diff.index
+            source_cursor = diff.old_index + 1
             for old_string in diff.old_tokens:
                 source_cursor += len(old_string)
 
         reconstructed_tokens += self.source_tokens[source_cursor:]
 
         if not reconstructed_tokens == self.dest_tokens:
-            dsdsds
             self.error = "reconstruction_error"
