@@ -97,6 +97,22 @@ def get_binary(note):
         pdf_binary = None
     return pdf_status, pdf_binary
 
+def write_pdf(forum_dir, pdf_binary, version_name):
+    assert pdf_binary is not None
+    full_pdf_path = f'{forum_dir}/{version_name}_full.pdf'
+    pdf_path = f'{forum_dir}/{version_name}.pdf'
+    with open(full_pdf_path, "wb") as f:
+        f.write(pdf_binary)
+    full_pdf = pikepdf.Pdf.open(full_pdf_path)
+    truncated_pdf = pikepdf.Pdf.new()
+    for page_num in range(3):
+        try:
+            truncated_pdf.pages.append(full_pdf.pages[page_num])
+        except IndexError:
+            break  # Sometimes there are fewer than 3 pages
+    truncated_pdf.save(pdf_path)
+    os.remove(full_pdf_path)
+
 
 def write_pdfs(forum_dir, initial_binary, final_binary):
     for binary, version in [(initial_binary, scc_lib.INITIAL),
@@ -149,7 +165,7 @@ def get_review_text_and_rating(note, conference):
     return review_text, rating
 
 
-def get_decision(forum_notes, conference):
+def get_decision_and_metareview_date(forum_notes, conference):
     if conference in [
             scc_lib.Conference.iclr_2018, scc_lib.Conference.iclr_2020,
             scc_lib.Conference.iclr_2021, scc_lib.Conference.iclr_2022,
@@ -157,11 +173,11 @@ def get_decision(forum_notes, conference):
     ]:
         for note in forum_notes:
             if 'Decision' in note.invitation:
-                return note.content['decision']
+                return note.content['decision'], note.tcdate
     elif conference in [scc_lib.Conference.iclr_2019]:
         for note in forum_notes:
             if 'Meta_Review' in note.invitation:
-                return note.content['recommendation']
+                return note.content['recommendation'], note.tcdate
     else:
         assert False
 
@@ -181,6 +197,84 @@ def get_reviews(forum_notes, conference):
     return review_notes, review_objects
 
 
+def get_submitted_version(references, review_notes):
+    # The submitted version is the last valid reference submitted before the
+    # first review was posted.
+
+    # Creation time of first review:
+    # Changes made before this time cannot have been influenced by reviewers.
+    first_review_time = min(rev.tcdate for rev in review_notes)
+
+    references_before_review = [
+        r for r in references if r.tcdate <= first_review_time
+    ]
+    # The initial revision is the latest valid revision of the list above
+    return get_last_valid_reference(references_before_review)
+
+
+def get_discussed_version(references, metareview_date):
+    # The post-discussion version is the last valid reference submitted before
+    # the metareview was posted.
+
+    references_before_metareview = [
+        r for r in references if r.tcdate <= metareview_date
+    ]
+
+    return get_last_valid_reference(references_before_metareview)
+
+
+def get_reference_url(reference_id):
+    return f'{PDF_URL_PREFIX}{reference_id}'
+
+
+def get_versions_and_write_pdfs(forum_id, forum_dir, metareview_date, review_notes):
+    # Retrieve all revisions of the manuscript in order of submission
+    references = sorted(GUEST_CLIENT.get_all_references(referent=forum_id,
+                                                        original=True),
+                        key=lambda x: x.tcdate)
+
+    versions = {
+        scc_lib.SUBMITTED: get_submitted_version(references, review_notes),
+        scc_lib.DISCUSSED: get_discussed_version(references, metareview_date),
+        scc_lib.FINAL: get_last_valid_reference(references)
+    }
+
+    version_references = {}
+    version_binaries = {}
+
+    url_builder = {v:None for v in scc_lib.VERSIONS}
+
+    for version_name, (maybe_status, maybe_binary) in versions.items():
+        version_references[version_name] = maybe_status
+        version_binaries[version_name] = maybe_binary
+
+    if version_references[scc_lib.SUBMITTED] is None:
+        return scc_lib.DownloadStatus.NO_PDF, url_builder
+
+    # Submitted version is valid.
+    submitted_id = version_references[scc_lib.SUBMITTED].id
+    url_builder[scc_lib.SUBMITTED] = get_reference_url(
+            submitted_id
+       )
+    write_pdf(forum_dir, version_binaries[scc_lib.SUBMITTED],
+        scc_lib.SUBMITTED)
+    valid_versions = [submitted_id]
+
+    for next_version in [scc_lib.DISCUSSED, scc_lib.FINAL]:
+        if version_references[next_version] is not None:
+            version_id = version_references[next_version].id
+            if version_id not in valid_versions:
+                valid_versions.append(version_id)
+                write_pdf(forum_dir, version_binaries[next_version],
+                next_version)
+                url_builder[next_version] = get_reference_url(version_id)
+
+    if len(set(valid_versions)) == 1:
+        return scc_lib.DownloadStatus.NO_REVISION, url_builder
+    else:
+        return scc_lib.DownloadStatus.COMPLETE, url_builder
+
+
 def process_forum(forum, conference, forum_dir):
 
     # Things needed for metadata:
@@ -189,12 +283,9 @@ def process_forum(forum, conference, forum_dir):
         'conference': conference,
         'reviews': None,
         'decision': None,
-        'urls': {
-            'forum': f'{FORUM_URL_PREFIX}{forum.id}',
-            'initial': None,
-            'final': None,
+        'forum_url': f'{FORUM_URL_PREFIX}{forum.id}',
+        'urls': None
         }
-    }
 
     forum_notes = GUEST_CLIENT.get_all_notes(forum=forum.id)
 
@@ -213,64 +304,22 @@ def process_forum(forum, conference, forum_dir):
     # == Check that decision exists ===========================================
 
     # Retrieve decision
-    metadata_builder['decision'] = get_decision(forum_notes, conference)
+    metadata_builder[
+        'decision'], metareview_date = get_decision_and_metareview_date(
+            forum_notes, conference)
 
     # Occasionally there is no decision
     if metadata_builder['decision'] is None:
         return scc_lib.DownloadStatus.NO_DECISION, metadata_builder
 
-    # === Get `initial' and `final' pdfs ======================================
+    status, urls = get_versions_and_write_pdfs(forum.id, forum_dir, metareview_date, review_notes)
 
-    # Retrieve all revisions of the manuscript in order of submission
-    references = sorted(GUEST_CLIENT.get_all_references(referent=forum.id,
-                                                        original=True),
-                        key=lambda x: x.tcdate)
+    metadata_builder['urls'] = urls
 
-    # Valid references are those associated with a valid PDF.
-
-    # --- final submission ----------------------------------------------------
-    # The latest valid revision
-
-    # The 'final' version is the latest valid version
-    final_reference, final_binary = get_last_valid_reference(references)
-
-    # --- initial submission --------------------------------------------------
-    # The latest valid pre-review revision
-
-    # Creation time of first review:
-    # Changes made before this time cannot have been influenced by reviewers.
-    first_review_time = min(rev.tcdate for rev in review_notes)
-
-    references_before_review = [
-        r for r in references if r.tcdate <= first_review_time
-    ]
-    # The initial revision is the latest valid revision of the list above
-    initial_reference, initial_binary = get_last_valid_reference(
-        references_before_review)
-
-    metadata_builder['urls'][
-        'initial'] = None if initial_reference is None else f'{PDF_URL_PREFIX}{initial_reference.id}'
-    metadata_builder['urls'][
-        'final'] = None if final_reference is None else f'{PDF_URL_PREFIX}{final_reference.id}'
-
-    # Proceed only for forums with valid and distinct initial and final
-    # versions
-    if final_reference is not None and initial_reference is not None:
-        if not final_reference.id == initial_reference.id:
-
-            # Write pdfs and metadata
-            write_pdfs(forum_dir, initial_binary, final_binary)
-            return scc_lib.DownloadStatus.COMPLETE, metadata_builder
-        else:
-            # Manuscript was not revised after the first review
-            return scc_lib.DownloadStatus.NO_REVISION, metadata_builder
-    else:
-        # No versions associated with valid PDFs were found
-        return scc_lib.DownloadStatus.NO_PDF, metadata_builder
+    return status, metadata_builder
 
 
 def process_forum_wrapper(forum, conference, output_dir):
-
 
     # Create a directory for the forum
     forum_dir = f'{output_dir}/{forum.id}'
@@ -319,3 +368,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
