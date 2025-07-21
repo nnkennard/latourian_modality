@@ -16,11 +16,13 @@ def main():
             with gzip.open(filename, 'rb') as f:
                 for line in f:
                     token, year, count, _ = line.split(b"\t")
+                    if not token.strip():
+                        continue
                     if int(year) >= YEAR_CUTOFF:
                         counts[token.decode().lower()] += int(count)
 
             for token, count in counts.most_common():
-                if count < 25:
+                if count < 100:
                     break
                 g.write(f'{token}\t{count}\n')
 

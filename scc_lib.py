@@ -23,7 +23,8 @@ class Conference(object):
 
 
 # Version names
-INITIAL, FINAL = "initial final".split()
+SUBMITTED, DISCUSSED, FINAL = "submitted discussed final".split()
+VERSIONS = [SUBMITTED, DISCUSSED, FINAL]
 
 
 class DownloadStatus(object):

@@ -33,8 +33,7 @@ parser.add_argument('-r',
                     help='prefix for tsv file with status of all forums')
 
 DiffingRecord = collections.namedtuple(
-    "DiffingRecord",
-    "conference forum_id abstract_status intro_status".split())
+    "DiffingRecord", "conference forum_id part source dest status".split())
 
 SENTENCIZE_PIPELINE = stanza.Pipeline("en", processors="tokenize")
 
@@ -51,6 +50,12 @@ def main():
                                              args.conference,
                                              scc_lib.Stage.COMPUTE)
 
+    possible_pairs = [
+        (scc_lib.SUBMITTED, scc_lib.DISCUSSED),
+        (scc_lib.DISCUSSED, scc_lib.FINAL),
+        (scc_lib.SUBMITTED, scc_lib.FINAL),
+    ]
+
     with open(
             scc_lib.get_record_filename(args.record_directory, args.conference,
                                         scc_lib.Stage.COMPUTE), 'a') as f:
@@ -64,28 +69,31 @@ def main():
             if forum_id in diffs_already_done:
                 continue
 
-            result_by_part = {}
             texts_filename = f'{args.data_dir}/{args.conference}/{forum_id}/texts.json'
             with open(texts_filename, 'r') as g:
                 obj = json.load(g)
-                for part in ['abstract', 'intro']:
-                    d = scc_diff_lib.DocumentDiff(
-                        get_tokens(obj['initial_info'][part]),
-                        get_tokens(obj['final_info'][part]))
-                    if d.error is None:
-                        result_by_part[part] = "complete"
-                        with open(
-                                texts_filename.replace('texts',
-                                                       f'diffs_{part}'),
-                                'w') as h:
-                            h.write(d.dump())
-                    else:
-                        result_by_part[part] = d.error
 
-                scc_lib.write_record(
-                    DiffingRecord(args.conference, forum_id,
-                                  result_by_part['abstract'],
-                                  result_by_part['intro']), f)
+                pairs_to_diff = []
+                for source, dest in possible_pairs:
+                    if obj[source] is not None and obj[dest] is not None:
+                        pairs_to_diff.append((source, dest))
+
+                for source, dest in pairs_to_diff:
+                    key = f'{source}_{dest}'
+                    for part in ['abstract', 'intro']:
+                        filename = texts_filename.replace(
+                            'texts', f'diffs_{part}_{key}')
+                        d = scc_diff_lib.DocumentDiff(get_tokens(obj[source][part]),
+                                                      get_tokens(obj[dest][part]))
+                        if d.error is None:
+                            result = "complete"
+                            with open(filename, 'w') as h:
+                                h.write(d.dump())
+                        else:
+                            result = d.error
+                        scc_lib.write_record(
+                            DiffingRecord(args.conference, forum_id, part,
+                                          source, dest, result), f)
 
 
 if __name__ == "__main__":

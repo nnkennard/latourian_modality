@@ -20,16 +20,15 @@ import tqdm
 
 MATCHING_BLOCK = "MatchingBlock"
 NONMATCHING_BLOCK = "NonMatchingBlock"
+MIN_MATCHING_BLOCK_LEN = 3
 MAX_LEN = 3000
 
 MatchingBlock = collections.namedtuple(MATCHING_BLOCK, "a b l".split())
 NonMatchingBlock = collections.namedtuple(NONMATCHING_BLOCK,
                                           "a b l_a l_b".split())
-#Diff = collections.namedtuple("Diff",
-#    "index old_tokens new_tokens".split())
 
-Diff2 = collections.namedtuple(
-    "Diff2", "old_index new_index old_tokens new_tokens".split())
+Diff = collections.namedtuple(
+    "Diff", "old_index new_index old_tokens new_tokens".split())
 
 
 def flatten_sentences(sentences):
@@ -62,7 +61,9 @@ def sentence_split(anchor, tokens, ranges, original_tokens):
             diff_ranges.append(maybe_intersection)
     split_tokens = []
     for r in diff_ranges:
-        split_tokens.append(original_tokens[r.lower_bound:r.upper_bound])
+        maybe_tokens  = original_tokens[r.lower_bound:r.upper_bound]
+        if maybe_tokens:
+            split_tokens.append(maybe_tokens)
 
     assert sum(split_tokens, []) == tokens
     return split_tokens
@@ -101,7 +102,6 @@ class DocumentDiff(object):
         # Verify chunk diff calculations
         self._reconstruct_from_chunk_diffs(chunk_diffs)
 
-        #self.diffs = chunk_diffs
         self.diffs = []
         for chunk_diff in chunk_diffs:
             self.diffs.append(self._unchunk_chunk_diff(chunk_diff))
@@ -112,8 +112,11 @@ class DocumentDiff(object):
     def _get_matching_blocks(self):
         """Get maximal matching blocks and calculate nonmatching blocks.
         """
-        matching_blocks = difflib.SequenceMatcher(
+        unfiltered_matching_blocks = difflib.SequenceMatcher(
             None, self.source_tokens, self.dest_tokens).get_matching_blocks()
+
+        matching_blocks = [b for b in unfiltered_matching_blocks if not b.size
+        or b.size > MIN_MATCHING_BLOCK_LEN]
 
         blocks = []  # Alternating matching and nonmatching blocks
 
@@ -154,7 +157,7 @@ class DocumentDiff(object):
             # an appendix being added. We just convert the block into one large
             # diff.
             return [
-                Diff2(block.a - 1, block.b - 1,
+                Diff(block.a - 1, block.b - 1,
                       self.source_tokens[block.a:block.a + block.l_a],
                       self.dest_tokens[block.b:block.b + block.l_b])
             ]
@@ -198,7 +201,7 @@ class DocumentDiff(object):
                     removed.append(token)
 
             diffs.append(
-                Diff2(diff_source_anchor, diff_dest_anchor, removed, inserted))
+                Diff(diff_source_anchor, diff_dest_anchor, removed, inserted))
         return diffs
 
     def _unchunk_chunk_diff(self, chunk_diff):
@@ -208,7 +211,7 @@ class DocumentDiff(object):
         unchunked_new = sentence_split(chunk_diff.new_index,
                                        chunk_diff.new_tokens, self.dest_ranges,
                                        self.dest_tokens)
-        return Diff2(chunk_diff.old_index, chunk_diff.new_index, unchunked_old,
+        return Diff(chunk_diff.old_index, chunk_diff.new_index, unchunked_old,
                      unchunked_new)
 
     def dump(self):
@@ -277,3 +280,4 @@ class DocumentDiff(object):
 
         if not reconstructed_tokens == self.dest_tokens:
             self.error = "reconstruction_error"
+

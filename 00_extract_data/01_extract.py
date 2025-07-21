@@ -33,7 +33,7 @@ parser.add_argument('-r',
 VERSION_FIELDS = "title abstract intro debug_next_sec".split()
 Version = collections.namedtuple("Version", VERSION_FIELDS)
 
-PAPER_FIELDS = "conference forum_id initial_info final_info".split()
+PAPER_FIELDS = "conference forum_id submitted discussed final".split()
 Paper = collections.namedtuple("Paper", PAPER_FIELDS)
 
 ExtractionRecord = collections.namedtuple(
@@ -162,6 +162,8 @@ def parse_clean_text(text):
 
 
 def process_pdf(pdf_path):
+    if not os.path.exists(pdf_path):
+        return None
     maybe_text = extract_text(pdf_path)
     if maybe_text is None:
         return scc_lib.ExtractionStatus.PDF_PARSE_ERROR
@@ -192,48 +194,68 @@ def main():
             if forum_id in extraction_already_done:
                 continue
 
-            record = None
             processed_texts = {}
-            for version_name in [scc_lib.INITIAL, scc_lib.FINAL]:
+            for version_name in scc_lib.VERSIONS:
                 pdf_path = f"{args.data_dir}/{args.conference}/{forum_id}/{version_name}.pdf"
-                processed_texts[version_name] = process_pdf(pdf_path)
+                maybe_processed_pdf = process_pdf(pdf_path)
+                if maybe_processed_pdf is not None:
+                    processed_texts[version_name] = maybe_processed_pdf
 
-            if all(isinstance(x, Version) for x in processed_texts.values()):
-                if processed_texts[scc_lib.INITIAL] == processed_texts[
-                        scc_lib.FINAL]:
+            valid_versions = [
+                v for v in processed_texts.values() if isinstance(v, Version)
+            ]
+            errors = [
+                e for e in processed_texts.values() if isinstance(e, str)
+            ]
+            if len(valid_versions) < 2:
+                if not errors:
                     record = ExtractionRecord(
                         args.conference, forum_id,
                         scc_lib.ExtractionStatus.NO_CHANGE, None)
-
                 else:
-                    with open(
-                            f'{args.data_dir}/{args.conference}/{forum_id}/texts.json',
-                            'w') as g:
-                        g.write(
-                            json.dumps(Paper(
-                                args.conference, forum_id,
-                                processed_texts[scc_lib.INITIAL]._asdict(),
-                                processed_texts[
-                                    scc_lib.FINAL]._asdict())._asdict(),
-                                       indent=2))
-                        record = ExtractionRecord(
-                            args.conference, forum_id,
-                            scc_lib.ExtractionStatus.COMPLETE, None)
-
+                    details = []
+                    for version_name, maybe_error in processed_texts.items():
+                        if isinstance(maybe_error, str):
+                            details.append(f'{version_name}_{maybe_error}')
+                    record = ExtractionRecord(args.conference, forum_id,
+                                              scc_lib.ExtractionStatus.ERROR,
+                                              "|".join(details))
             else:
-                details = [
-                    processed_texts[v]
-                    for v in [scc_lib.INITIAL, scc_lib.FINAL]
-                ]
-                details = [
-                    x if isinstance(x, str) else
-                    scc_lib.ExtractionStatus.COMPLETE for x in details
-                ]
-                record = ExtractionRecord(args.conference, forum_id,
+                # At least 2 versions -- some diffs to look at
+                prepared_processed_texts = {}
+                details = []
+                for version_name, maybe_version in processed_texts.items():
+                    if maybe_version is None:
+                        prepared_processed_texts[version_name] = None
+                    elif isinstance(maybe_version, str):
+                        details.append(f'{version_name}_{maybe_error}')
+                        prepared_processed_texts[version_name] = None
+                    else:
+                        prepared_processed_texts[
+                            version_name] = maybe_version._asdict()
+                paper = Paper(
+                    args.conference,
+                    forum_id,
+                    prepared_processed_texts.get(scc_lib.SUBMITTED, None),
+                    prepared_processed_texts.get(scc_lib.DISCUSSED, None),
+                    prepared_processed_texts.get(scc_lib.FINAL, None),
+                )
+                with open(
+                        f'{args.data_dir}/{args.conference}/{forum_id}/texts.json',
+                        'w') as g:
+                    g.write(json.dumps(paper._asdict(), indent=2))
+                if details:
+                    details = "|".join(details)
+                    record = ExtractionRecord(args.conference, forum_id,
                                           scc_lib.ExtractionStatus.ERROR,
                                           details)
+                else:
+                    details = None
+                    record = ExtractionRecord(args.conference, forum_id,
+                                          scc_lib.ExtractionStatus.COMPLETE,
+                                          details)
 
-            scc_lib.write_record(record, f)
+                scc_lib.write_record(record, f)
 
 
 if __name__ == "__main__":
